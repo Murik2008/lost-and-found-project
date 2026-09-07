@@ -2,3 +2,5 @@
 /.venv
 /postman
 /.postman
+.env
+.env.example
