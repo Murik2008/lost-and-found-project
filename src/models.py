@@ -14,9 +14,9 @@ class ItemType(str, Enum):
 
 
 class ItemStatus(str, Enum):
-    PENDING = "pending"    # no match found yet
-    MATCHED = "matched"    # a match was found
-    CLOSED = "closed"      # resolved / closed manually
+    PENDING = "pending"
+    MATCHED = "matched"
+    CLOSED = "closed"
 
 
 class Item(BaseModel):
@@ -24,10 +24,10 @@ class Item(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     item_type: ItemType
-    user_description: str = ""                # free text from the user
-    image_path: str                           # where the image is stored on disk
-    description_json: dict[str, Any]          # output of ItemDescription.to_dict()
-    embedding: list[float]                    # output of ai.embed(), stored as JSON
+    user_description: str = ""
+    image_path: str
+    description_json: dict[str, Any]
+    embedding: list[float]
     status: ItemStatus = ItemStatus.PENDING
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
