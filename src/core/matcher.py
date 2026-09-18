@@ -1,5 +1,5 @@
 from typing import Any, Dict, List
-from src.services.ai_service import AIService
+from src import AIService
 
 
 class Matcher:
