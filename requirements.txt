@@ -1,0 +1,37 @@
+# ── AI layer (from requirements-ai.txt)
+numpy>=1.24
+pydantic>=2.7
+
+# ── Config
+pydantic-settings>=2.0          # config.py / typed settings from env
+
+# ── HTTP API
+fastapi>=0.110
+uvicorn[standard]>=0.29         # ASGI server to run FastAPI
+python-multipart>=0.0.9         # required for file upload endpoints in FastAPI
+
+# ── CLI
+typer>=0.12                     # or click>=8.1 — pick one
+
+# ── Storage
+asyncpg>=0.29                   # async PostgreSQL driver (pairs with asyncio)
+
+# ── Image validation
+Pillow>=10.0                    # detect JPEG/PNG, check dimensions & file size
+
+# ── Retries
+tenacity>=8.2                   # exponential backoff on ai.* calls
+
+# ── Caching
+cachetools>=5.3                 # TTLCache / LRUCache for embedding results
+
+# ── Tests
+pytest>=8.0
+pytest-asyncio>=0.23            # async test support
+pytest-cov>=5.0                 # coverage reporting (≥60% required)
+httpx>=0.27                     # FastAPI test client (TestClient uses it)
+
+# ── Provider SDKs (pick at least one pair)
+anthropic>=0.39.0               # VLM  — Claude (recommended)
+openai>=1.50.0                  # Embeddings — text-embedding-3-small
+# google-genai>=0.3.0           # Alternative: both VLM + embeddings
