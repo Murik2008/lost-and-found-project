@@ -134,6 +134,52 @@ def create_app(
         mode = "offline" if settings.use_offline else "online"
         return {"status": "ok", "mode": mode}
 
+    @app.post("/items/preview")
+    async def preview(image: UploadFile = File(...)) -> dict:
+        """Describe an uploaded photo without saving anything.
+
+        Used by the report form to suggest presets as soon as a photo
+        is picked, before publishing.
+        """
+        import asyncio
+        import tempfile
+        from pathlib import Path
+
+        if service is None:
+            raise HTTPException(
+                status_code=501, detail="AIService not implemented yet."
+            )
+        data = await image.read()
+        try:
+            suffix = validate_image_bytes(
+                data, image.filename or "upload.png", settings.max_file_size_bytes
+            )
+        except ValidationError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=suffix, dir=str(settings.data_dir), delete=False
+        )
+        try:
+            tmp.write(data)
+            tmp.close()
+            try:
+                if hasattr(service, "describe_item"):
+                    desc = await asyncio.to_thread(
+                        service.describe_item, tmp.name, ""
+                    )
+                else:
+                    desc, _ = await service.adescribe_and_embed(tmp.name, "")
+            except ProviderError as e:
+                raise HTTPException(
+                    status_code=502, detail=f"AI provider error: {e}"
+                ) from e
+            return {"description": desc.to_dict()}
+        finally:
+            try:
+                Path(tmp.name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
     async def _register(
         image: UploadFile, user_description: str, item_type: ItemType
     ) -> Item:

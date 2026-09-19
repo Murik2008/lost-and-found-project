@@ -311,6 +311,20 @@ def test_image_404(client):
     assert c.get("/items/nope/image").status_code == 404
 
 
+def test_preview_ok(client):
+    c, _, _ = client
+    data, name = _sample_png_bytes()
+    r = c.post("/items/preview", files={"image": (name, data, "image/png")})
+    assert r.status_code == 200
+    assert r.json()["description"] == {"color": "black", "category": "umbrella"}
+
+
+def test_preview_bad_image(client):
+    c, _, _ = client
+    r = c.post("/items/preview", files={"image": ("evil.txt", b"xx", "text/plain")})
+    assert r.status_code == 400
+
+
 def test_matches_min_score_filters(monkeypatch):
     repo = FakeRepo()
     service = FakeService()

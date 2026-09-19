@@ -14,6 +14,14 @@
       "request": { "method": "GET", "url": "{{base_url}}/health" }
     },
     {
+      "name": "Preview photo (presets before publish)",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/items/preview",
+        "body": { "mode": "formdata", "formdata": [{ "key": "image", "type": "file", "src": [] }] }
+      }
+    },
+    {
       "name": "Register lost",
       "request": {
         "method": "POST",
