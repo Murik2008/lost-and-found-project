@@ -330,10 +330,18 @@ tailwind.config = { theme: { extend: {
   const fileInput = $("file-input"), dropzone = $("dropzone");
   const DEFAULT_PRESETS = ["Apple AirPods Pro (white case)", "Black leather bifold wallet", "MacBook Air M2 (space grey)", "Silver house keys, blue tag"];
   function cap1(s) { s = String(s || ""); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
-  function renderPresets(list) {
+  function renderPresets(list, clickable) {
+    if (clickable === undefined) clickable = true;
     const row = $("preset-row");
-    row.querySelectorAll(".preset-chip").forEach(c => c.remove());
+    row.querySelectorAll(".preset-chip,.preset-note").forEach(c => c.remove());
     list.slice(0, 4).forEach(t => {
+      if (!clickable) {
+        const s = document.createElement("span");
+        s.className = "preset-note text-[#46464a]";
+        s.textContent = t;
+        row.appendChild(s);
+        return;
+      }
       const b = document.createElement("button");
       b.type = "button";
       b.className = "preset-chip bg-[#F7F7F8] hover:bg-[#eeedf7] px-2.5 py-1 rounded-full font-semibold";
@@ -367,7 +375,25 @@ tailwind.config = { theme: { extend: {
     $("upload-preview-container").classList.remove("hidden");
     $("upload-preview-container").classList.add("flex");
     renderPresets(presetsFromName(f.name));
+    suggestFromPhoto(f);
   };
+  let suggestSeq = 0;
+  async function suggestFromPhoto(f) {
+    const my = ++suggestSeq;
+    renderPresets(["Analyzing photo…"], false);
+    const fd = new FormData();
+    fd.append("image", f);
+    try {
+      const r = await fetch("/items/preview", { method: "POST", body: fd });
+      if (my !== suggestSeq) return;
+      if (!r.ok) { renderPresets(presetsFromName(f.name)); return; }
+      const b = await r.json();
+      const ai = presetsFromAI(b.description || {});
+      renderPresets(ai || presetsFromName(f.name));
+    } catch (e) {
+      if (my === suggestSeq) renderPresets(presetsFromName(f.name));
+    }
+  }
   $("btn-clear-file").onclick = (e) => { e.stopPropagation();
     fileInput.value = ""; $("upload-prompt").classList.remove("hidden");
     $("upload-preview-container").classList.add("hidden");
