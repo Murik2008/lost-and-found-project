@@ -9,11 +9,10 @@ from typing import Optional, Sequence
 from src.models import Item, ItemStatus, ItemType
 from src.storage import repository
 
-ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 
 def validate_input(description: str, image_path: Optional[str]) -> Optional[str]:
-    """Description and image validity check"""
     if not description or not description.strip():
         return "ERROR: Description cannot be empty or whitespace only."
 
@@ -44,9 +43,8 @@ async def handle_register(args: argparse.Namespace, item_type: ItemType) -> int:
 
     saved_item = await repository.create_item(item)
 
-    type_str = "LOST" if item_type == ItemType.LOST else "FOUND"
-    sys.stdout.write(f"[SUCCESS] Registered {item_type.value} item with ID: {saved_item.id}\n")
-    sys.stdout.write(f"Type: {type_str}\n")
+    sys.stdout.write(f"Success: Registered {item_type.value} item with ID: {saved_item.id}\n")
+    sys.stdout.write(f"Type: {item_type.value.upper()}\n")
     return 0
 
 
