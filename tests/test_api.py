@@ -325,6 +325,51 @@ def test_preview_bad_image(client):
     assert r.status_code == 400
 
 
+class ValidDesc:
+    def to_dict(self):
+        return {"object_class": "umbrella", "colors": ["black"], "confidence": 0.9}
+
+    def to_search_text(self):
+        return "umbrella | colors: black"
+
+
+class CountingService:
+    def __init__(self):
+        self.calls = {"describe": 0, "embed": 0, "full": 0}
+
+    def describe_item(self, image_path, user_text=""):
+        self.calls["describe"] += 1
+        return ValidDesc()
+
+    def embed(self, text):
+        self.calls["embed"] += 1
+        return [0.1, 0.2, 0.3]
+
+    async def adescribe_and_embed(self, image_path, user_text):
+        self.calls["full"] += 1
+        return ValidDesc(), [0.1, 0.2, 0.3]
+
+
+def test_preview_then_register_reuses_analysis():
+    import src.api as api_mod
+
+    api_mod._preview_cache.clear()
+    service = CountingService()
+    app = create_app(repo=FakeRepo(), service=service)
+    c = TestClient(app)
+    data, name = _sample_png_bytes()
+    assert c.post("/items/preview", files={"image": (name, data, "image/png")}).status_code == 200
+    r = c.post(
+        "/items/lost",
+        files={"image": (name, data, "image/png")},
+        data={"user_description": "umbrella"},
+    )
+    assert r.status_code == 201
+    assert r.json()["description_json"]["object_class"] == "umbrella"
+    assert service.calls == {"describe": 1, "embed": 1, "full": 0}
+    api_mod._preview_cache.clear()
+
+
 def test_matches_min_score_filters(monkeypatch):
     repo = FakeRepo()
     service = FakeService()

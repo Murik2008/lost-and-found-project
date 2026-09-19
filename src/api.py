@@ -50,6 +50,22 @@ class StatusUpdate(BaseModel):
     status: ItemStatus
 
 
+_preview_cache: dict[str, dict] = {}
+_PREVIEW_CACHE_MAX = 200
+
+
+def _image_sha(data: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def _preview_cache_store(sha: str, desc_dict: dict) -> None:
+    if len(_preview_cache) >= _PREVIEW_CACHE_MAX:
+        _preview_cache.pop(next(iter(_preview_cache)))
+    _preview_cache[sha] = desc_dict
+
+
 def _default_repo() -> ItemRepositoryProto | None:
     """Lazy default repo."""
     try:
@@ -173,7 +189,9 @@ def create_app(
                 raise HTTPException(
                     status_code=502, detail=f"AI provider error: {e}"
                 ) from e
-            return {"description": desc.to_dict()}
+            desc_dict = desc.to_dict()
+            _preview_cache_store(_image_sha(data), desc_dict)
+            return {"description": desc_dict}
         finally:
             try:
                 Path(tmp.name).unlink(missing_ok=True)
@@ -209,7 +227,25 @@ def create_app(
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         try:
-            desc, vec = await service.adescribe_and_embed(stored, text)
+            desc = None
+            vec = None
+            cached = _preview_cache.get(_image_sha(data))
+            if cached is not None and hasattr(service, "embed"):
+                import asyncio
+
+                from ai import ItemDescription
+
+                try:
+                    desc = ItemDescription.model_validate(cached)
+                    vec = await asyncio.to_thread(
+                        service.embed, desc.to_search_text()
+                    )
+                    logger.info("API reused preview analysis, image already seen")
+                except Exception:
+                    logger.warning("cached preview invalid, re-analyzing")
+                    desc = None
+            if desc is None:
+                desc, vec = await service.adescribe_and_embed(stored, text)
         except ProviderError as e:
             raise HTTPException(status_code=502, detail=f"AI provider error: {e}") from e
         item = Item(
