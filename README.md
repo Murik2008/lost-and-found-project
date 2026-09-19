@@ -82,6 +82,9 @@ curl -F "image=@data/lost/umbrella_black.png" -F "user_description=black umbrell
 curl "http://localhost:8000/items/<id>"
 curl "http://localhost:8000/items/<id>/image"   # photo
 curl "http://localhost:8000/items/<id>/matches?k=5&min_score=0.5"
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"other_item_id":"<other-id>"}' http://localhost:8000/items/<id>/match
+curl "http://localhost:8000/items/<id>/pair"   # what it was matched with
 curl -X PATCH -H "Content-Type: application/json" -H "X-Owner-Token: <token>" \
   -d '{"status":"matched"}' http://localhost:8000/items/<id>/status
 curl -X DELETE -H "X-Owner-Token: <token>" http://localhost:8000/items/<id>

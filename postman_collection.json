@@ -82,13 +82,17 @@
       "request": { "method": "GET", "url": "{{base_url}}/items/{{item_id}}/matches?k=5&min_score=0.5" }
     },
     {
-      "name": "Mark matched",
+      "name": "Confirm match (marks both matched)",
       "request": {
-        "method": "PATCH",
+        "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "url": "{{base_url}}/items/{{item_id}}/status",
-        "body": { "mode": "raw", "raw": "{\"status\": \"matched\"}" }
+        "url": "{{base_url}}/items/{{item_id}}/match",
+        "body": { "mode": "raw", "raw": "{\"other_item_id\": \"PASTE_OTHER_ID\"}" }
       }
+    },
+    {
+      "name": "Matched with",
+      "request": { "method": "GET", "url": "{{base_url}}/items/{{item_id}}/pair" }
     },
     {
       "name": "Delete item (API only, not on the site)",

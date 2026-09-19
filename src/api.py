@@ -50,6 +50,10 @@ class StatusUpdate(BaseModel):
     status: ItemStatus
 
 
+class MatchRequest(BaseModel):
+    other_item_id: str
+
+
 _preview_cache: dict[str, dict] = {}
 _PREVIEW_CACHE_MAX = 200
 
@@ -407,6 +411,142 @@ def create_app(
             raise HTTPException(status_code=404, detail="Item not found")
         logger.info("deleted item %s", item_id)
         return {"deleted": item_id}
+
+    async def _load(item_id: str) -> Item:
+        item = repo.get(item_id)
+        if isawaitable(item):
+            item = await item
+        if item is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return item
+
+    async def _set_status(item_id: str, status: ItemStatus) -> Item:
+        if hasattr(repo, "update_item_status"):
+            updated = repo.update_item_status(item_id, status)
+        else:
+            from src.storage import repository as repo_mod
+
+            updated = repo_mod.update_item_status(item_id, status)
+        if isawaitable(updated):
+            updated = await updated
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return updated
+
+    def _enrich_match(mid: str, score: float, reason: str) -> dict:
+        entry: dict[str, Any] = {
+            "item_id": mid,
+            "score": score,
+            "reason": reason,
+            "image_url": f"/items/{mid}/image",
+        }
+        return entry
+
+    async def _fill_candidate(entry: dict) -> dict:
+        cand = repo.get(entry["item_id"])
+        if isawaitable(cand):
+            cand = await cand
+        if cand is None:
+            try:
+                from src.storage import repository as repo_mod
+
+                cand = await repo_mod.get_item(entry["item_id"])
+            except Exception:
+                cand = None
+        if cand is not None:
+            entry["item_type"] = cand.item_type.value
+            entry["status"] = cand.status.value
+            entry["user_description"] = cand.user_description
+            entry["description"] = cand.description_json
+        return entry
+
+    @app.post("/items/{item_id}/match")
+    async def confirm_match(item_id: str, payload: MatchRequest) -> dict:
+        """Confirm a reunion between two opposite-side items.
+
+        Marks both items as matched and stores the pair, so the board
+        can later show what each item was matched with.
+        """
+        from src.models import MatchRecord
+
+        if repo is None:
+            raise HTTPException(
+                status_code=501, detail="ItemRepository not implemented yet."
+            )
+        item = await _load(item_id)
+        other = await _load(payload.other_item_id)
+        if item.item_type == other.item_type:
+            raise HTTPException(
+                status_code=400,
+                detail="A match needs one lost and one found item.",
+            )
+        lost = item if item.item_type == ItemType.LOST else other
+        found = other if item.item_type == ItemType.LOST else item
+        try:
+            from src.concurrency.pipeline import _match_reason
+
+            reason = _match_reason(
+                item.description_json or {}, other.description_json or {}
+            )
+        except Exception:
+            reason = "confirmed match"
+        score = 1.0
+        try:
+            if service is not None and hasattr(service, "cosine_similarity"):
+                score = float(
+                    service.cosine_similarity(item.embedding, other.embedding)
+                )
+            else:
+                import numpy as np
+
+                from ai import cosine
+
+                score = float(
+                    cosine(np.asarray(item.embedding), np.asarray(other.embedding))
+                )
+        except Exception:
+            pass
+        await _set_status(item.id, ItemStatus.MATCHED)
+        await _set_status(other.id, ItemStatus.MATCHED)
+        from src.storage import repository as repo_mod
+
+        record = await repo_mod.create_match(
+            MatchRecord(
+                lost_item_id=lost.id,
+                found_item_id=found.id,
+                score=score,
+                reason=reason,
+            )
+        )
+        logger.info("matched %s <-> %s score=%.3f", lost.id, found.id, score)
+        return {
+            "lost_item_id": record.lost_item_id,
+            "found_item_id": record.found_item_id,
+            "score": record.score,
+            "reason": record.reason,
+        }
+
+    @app.get("/items/{item_id}/pair")
+    async def get_pair(item_id: str) -> dict:
+        """Return confirmed match pair(s) previously stored for this item."""
+        if repo is None:
+            raise HTTPException(
+                status_code=501, detail="ItemRepository not implemented yet."
+            )
+        await _load(item_id)
+        from src.storage import repository as repo_mod
+
+        records = await repo_mod.get_matches_for_item(item_id)
+        pairs = []
+        for rec in records:
+            other_id = (
+                rec.found_item_id
+                if rec.lost_item_id == item_id
+                else rec.lost_item_id
+            )
+            entry = _enrich_match(other_id, rec.score, rec.reason)
+            pairs.append(await _fill_candidate(entry))
+        return {"query_id": item_id, "pairs": pairs}
 
     @app.get("/items/{item_id}/matches")
     async def get_matches(

@@ -32,6 +32,28 @@ tailwind.config = { theme: { extend: {
   button,input,select,textarea{font-family:Inter,-apple-system,"Segoe UI",Roboto,sans-serif;}
   ::-webkit-scrollbar{width:8px;height:8px;} ::-webkit-scrollbar-thumb{background:#d4d4d8;border-radius:99px;}
   .toast{transition:all .3s ease;}
+  .pstack{position:relative;width:58px;height:42px;flex:none}
+  .pstack img{position:absolute;width:42px;height:42px;object-fit:cover;border-radius:9px;
+    border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:transform .2s;background:#F7F7F8}
+  .pstack img:first-child{left:0;top:0;transform:rotate(-7deg)}
+  .pstack img:last-child{left:16px;top:0;transform:rotate(7deg)}
+  .pstack:hover img:first-child{transform:rotate(-13deg) translateX(-5px)}
+  .pstack:hover img:last-child{transform:rotate(13deg) translateX(5px)}
+  .reunion-fan{position:absolute;right:10px;bottom:10px;width:96px;height:96px;object-fit:cover;
+    border-radius:12px;border:3px solid #fff;box-shadow:0 6px 18px rgba(0,0,0,.25);
+    transform:rotate(7deg);transition:transform .25s}
+  .reunion-fan:hover{transform:rotate(0deg) scale(1.35);z-index:5}
+  .duo{position:relative;width:100%;height:11rem;background:#F7F7F8;border-radius:.5rem;
+    display:flex;align-items:center;justify-content:center}
+  .duo img{width:88px;height:88px;object-fit:cover;border-radius:14px;background:#fff;
+    border:3px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,.2);cursor:pointer;
+    transition:transform .25s ease}
+  .duo img.duo-a{transform:rotate(-8deg) translateX(10px)}
+  .duo img.duo-b{transform:rotate(8deg) translateX(-10px)}
+  .duo:hover img.duo-a{transform:rotate(-12deg) translateX(-30px)}
+  .duo:hover img.duo-b{transform:rotate(12deg) translateX(30px)}
+  .dt-row{display:flex;gap:8px;font-size:13px;padding:5px 0;border-bottom:1px solid #f0f0f4}
+  .dt-row span:first-child{color:#77777b;min-width:110px}
 </style>
 </head>
 <body class="antialiased">
@@ -269,6 +291,14 @@ tailwind.config = { theme: { extend: {
   </div>
 </footer>
 
+<div id="dt-overlay" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(11,11,12,.45);align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto" onclick="if(event.target===this)closeDetail()">
+  <div style="background:#fff;border-radius:16px;max-width:480px;width:100%;padding:20px;box-shadow:0 24px 60px -12px rgba(0,0,0,.3)">
+    <div id="dt-body"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px">
+      <button type="button" onclick="closeDetail()" style="padding:9px 18px;border-radius:10px;border:1px solid #E4E4E7;background:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer">Close</button>
+    </div>
+  </div>
+</div>
 <div id="cm-overlay" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(11,11,12,.45);align-items:center;justify-content:center;padding:16px">
   <div style="background:#fff;border-radius:16px;max-width:400px;width:100%;padding:22px;box-shadow:0 24px 60px -12px rgba(0,0,0,.3);font-family:Inter,-apple-system,'Segoe UI',Roboto,sans-serif">
     <div style="display:flex;align-items:center;gap:10px">
@@ -456,9 +486,11 @@ tailwind.config = { theme: { extend: {
       const r = await fetch(`/items/${encodeURIComponent(id)}/matches?k=3&min_score=${ms}`);
       const b = await r.json();
       if (!r.ok) { cnt.textContent = "Failed"; box.innerHTML = `<div class="bg-white rounded-lg p-4 text-center text-[13px] text-[#46464a]">Error: ${esc(b.detail || r.status)}</div>`; return; }
-      cnt.textContent = b.matches.length ? `${b.matches.length} candidate${b.matches.length > 1 ? "s" : ""}` : "No hits";
-      if (!b.matches.length) { box.innerHTML = `<div class="bg-white rounded-lg p-4 text-center text-[13px] text-[#46464a]">Nothing above threshold — lower it.</div>`; return; }
-      box.innerHTML = `<p class="text-[11px] text-[#46464a] px-1">Top ${b.matches.length} from the ${other} pool</p>` + b.matches.map(m => {
+      if (!b.matches.length) { cnt.textContent = "No hits"; box.innerHTML = `<div class="bg-white rounded-lg p-4 text-center text-[13px] text-[#46464a]">Nothing above threshold — lower it.</div>`; return; }
+      const open = b.matches.filter(m => m.status === "pending" && m.item_type && m.item_type !== me.item_type);
+      cnt.textContent = `${open.length} open candidate${open.length === 1 ? "" : "s"}`;
+      if (!open.length) { box.innerHTML = `<div class="bg-white rounded-lg p-4 text-center text-[13px] text-[#46464a]">Only already-matched items found — nothing open to match.</div>`; return; }
+      box.innerHTML = `<p class="text-[11px] text-[#46464a] px-1">Top ${open.length} open from the ${other} pool</p>` + open.map(m => {
         const d = m.description || {};
         const at = [d.object_class, (d.colors || []).join(", ")].filter(Boolean).join(" · ");
         return `<div class="bg-white rounded-lg p-2.5 flex flex-col gap-1.5">
@@ -472,6 +504,7 @@ tailwind.config = { theme: { extend: {
             <div class="text-[10px] text-[#46464a]">match</div></div>
           </div>
           <div class="w-full bg-[#F7F7F8] rounded-full h-1.5 overflow-hidden"><div class="bg-[#10B981] h-full" style="width:${pct(m.score)}%"></div></div>
+          <div class="text-[11px] font-semibold hidden" data-cpair="${esc(m.item_id)}" style="color:#6366F1"></div>
           <div class="flex items-center justify-between gap-2">
             <span class="text-[11px] text-[#46464a] truncate">${esc(m.reason || "")}</span>
             <button type="button" class="sel-btn text-xs font-bold hover:underline whitespace-nowrap" data-mine="${esc(id)}" data-other="${esc(m.item_id)}" data-desc="${esc(m.user_description || m.item_id)}">Select ✓</button>
@@ -479,7 +512,24 @@ tailwind.config = { theme: { extend: {
       }).join("");
       box.querySelectorAll(".sel-btn").forEach(btn => btn.onclick = () =>
         openConfirm(btn.dataset.mine, btn.dataset.other, btn.dataset.desc));
+      fillCandidatePairs(box);
     } catch (e) { cnt.textContent = "Failed"; box.innerHTML = `<div class="bg-white rounded-lg p-4 text-center text-[13px] text-[#46464a]">Server unreachable.</div>`; }
+  }
+  async function fillCandidatePairs(root) {
+    const els = (root || document).querySelectorAll("[data-cpair]");
+    await Promise.all(Array.from(els).map(async (el) => {
+      try {
+        const r = await fetch(`/items/${encodeURIComponent(el.dataset.cpair)}/pair`);
+        if (!r.ok) return;
+        const b = await r.json();
+        if (!b.pairs.length) return;
+        const p = b.pairs[0];
+        el.classList.remove("hidden");
+        el.innerHTML = `<span class="pstack" style="width:46px;height:34px"><img loading="lazy" src="/items/${esc(el.dataset.cpair)}/image" alt="" style="width:32px;height:32px" onerror="this.style.display='none'"/><img loading="lazy" src="/items/${esc(p.item_id)}/image" alt="" style="width:32px;height:32px" onerror="this.style.display='none'"/></span>` +
+          `<span>✓ Matched with <b>${esc(p.user_description || p.item_id.slice(0, 8))}</b></span>`;
+        el.style.display = "flex"; el.style.alignItems = "center"; el.style.gap = "7px";
+      } catch (e) { /* ignore */ }
+    }));
   }
   let confirmPair = null;
   function openConfirm(mine, other, desc) {
@@ -493,11 +543,12 @@ tailwind.config = { theme: { extend: {
     const { mine, other } = confirmPair;
     closeConfirm();
     try {
-      const opts = { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "matched" }) };
-      const r1 = await fetch(`/items/${encodeURIComponent(mine)}/status`, opts);
-      const r2 = await fetch(`/items/${encodeURIComponent(other)}/status`, opts);
-      if (!r1.ok || !r2.ok) { toast("Could not mark matched", "error"); return; }
-      toast("Both items marked as matched ✓", "success");
+      const r = await fetch(`/items/${encodeURIComponent(mine)}/match`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ other_item_id: other }) });
+      if (!r.ok) { const b = await r.json(); toast(`Error: ${b.detail || r.status}`, "error"); return; }
+      const b = await r.json();
+      toast(`Reunited ✓ (${Math.round(b.score * 100)}%)`, "success");
       stats(); loadBoard(); runScan();
     } catch (e) { toast("Server unreachable", "error"); }
   }
@@ -507,7 +558,7 @@ tailwind.config = { theme: { extend: {
     const at = [d.object_class, (d.colors || []).join(", ")].filter(Boolean).join(" · ");
     const kpill = i.item_type === "lost" ? "bg-[#EF4444] text-white" : "bg-[#10B981] text-white";
     const spill = i.status === "matched" ? "bg-[#6366F1] text-white" : i.status === "closed" ? "bg-[#10B981] text-white" : "bg-[#F7F7F8] text-[#46464a]";
-    return `<div class="bg-white rounded-xl p-2 shadow-sm hover:shadow-md transition-all flex flex-col" data-id="${esc(i.id)}">
+    return `<div class="bg-white rounded-xl p-2 shadow-sm hover:shadow-md transition-all flex flex-col cursor-pointer" data-id="${esc(i.id)}" onclick="openDetail('${esc(i.id)}')">
       <div class="relative w-full h-44 rounded-lg overflow-hidden bg-[#F7F7F8]">
         <img src="/items/${esc(i.id)}/image" alt="" loading="lazy" class="w-full h-full object-cover" onerror="this.style.display='none'"/>
         <div class="absolute top-2.5 left-2.5 flex gap-1.5">
@@ -519,9 +570,26 @@ tailwind.config = { theme: { extend: {
         <div class="text-[11px] text-[#46464a]">${esc(ago(i.created_at))}${at ? " · " + esc(at) : ""}</div>
         <h4 class="text-sm font-bold line-clamp-2 min-h-[40px]">${esc(i.user_description)}</h4>
         <div class="pt-1 mt-1 flex items-center justify-between">
-          <button type="button" class="text-xs font-semibold text-[#46464a] hover:text-black flex items-center gap-1" onclick="quickMatch('${esc(i.id)}')"><span class="material-symbols-outlined text-[16px]">auto_awesome</span>Check Matches</button>
+          <button type="button" class="text-xs font-semibold text-[#46464a] hover:text-black flex items-center gap-1" onclick="event.stopPropagation();quickMatch('${esc(i.id)}')"><span class="material-symbols-outlined text-[16px]">auto_awesome</span>Check Matches</button>
           <span class="font-mono text-[10px] text-[#c7c6ca]">${esc(i.id.slice(0, 8))}</span>
         </div>
+      </div></div>`;
+  }
+  function reunionCardHtml(a, p) {
+    return `<div class="bg-white rounded-xl p-2 shadow-sm hover:shadow-md transition-all flex flex-col cursor-pointer" onclick="openDetail('${esc(a.id)}')">
+      <div class="relative rounded-lg overflow-hidden">
+        <div class="duo">
+          <img src="/items/${esc(a.id)}/image" alt="" loading="lazy" class="duo-a" onerror="this.style.display='none'" onclick="event.stopPropagation();openDetail('${esc(a.id)}')"/>
+          <img src="/items/${esc(p.item_id)}/image" alt="" loading="lazy" class="duo-b" onerror="this.style.display='none'" onclick="event.stopPropagation();openDetail('${esc(p.item_id)}')"/>
+        </div>
+        <div class="absolute top-2.5 left-2.5 flex gap-1.5">
+          <span class="bg-[#6366F1] text-white text-[11px] font-bold uppercase px-2 py-0.5 rounded-full">Matched</span>
+        </div>
+      </div>
+      <div class="pt-2 px-1 flex flex-col flex-1">
+        <div class="text-sm font-bold line-clamp-2 min-h-[40px]">${esc(a.user_description)}</div>
+        <div class="mt">Matched with <b>${esc(p.user_description || p.item_id.slice(0, 8))}</b> (${Math.round(p.score * 100)}%)</div>
+        <div class="pt-1 mt-1"><span class="font-mono text-[10px] text-[#c7c6ca]">${esc(a.id.slice(0, 8))} ↔ ${esc(p.item_id.slice(0, 8))}</span></div>
       </div></div>`;
   }
   window.quickMatch = (id) => { $("match-item-id").value = id;
@@ -533,8 +601,22 @@ tailwind.config = { theme: { extend: {
     const h = Math.floor(m / 60); if (h < 24) return h + "h ago";
     return Math.floor(h / 24) + "d ago";
   }
-  function paintBoard(list) {
-    $("items-grid").innerHTML = list.map(cardHtml).join("");
+  function paintBoard(list, pairMap) {
+    pairMap = pairMap || {};
+    const seen = new Set();
+    const html = [];
+    for (const i of list) {
+      if ((i.status === "matched" || i.status === "closed") && pairMap[i.id]) {
+        const p = pairMap[i.id];
+        const key = [i.id, p.item_id].sort().join("|");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        html.push(reunionCardHtml(i, p));
+      } else {
+        html.push(cardHtml(i));
+      }
+    }
+    $("items-grid").innerHTML = html.join("");
     const empty = $("empty-state");
     if (!list.length) { empty.classList.remove("hidden"); empty.classList.add("flex"); }
     else { empty.classList.add("hidden"); empty.classList.remove("flex"); }
@@ -557,13 +639,54 @@ tailwind.config = { theme: { extend: {
       const r = await fetch("/items?" + q.toString());
       let list = await r.json();
       if (fQ) { const s = fQ.toLowerCase(); list = list.filter(i => (i.user_description || "").toLowerCase().includes(s)); }
-      paintBoard(list);
+      const needPair = list.filter(i => i.status === "matched" || i.status === "closed");
+      const pairMap = {};
+      await Promise.all(needPair.map(async (i) => {
+        try {
+          const pr = await fetch(`/items/${encodeURIComponent(i.id)}/pair`);
+          if (!pr.ok) return;
+          const b = await pr.json();
+          if (b.pairs && b.pairs.length) pairMap[i.id] = b.pairs[0];
+        } catch (e) { /* ignore */ }
+      }));
+      paintBoard(list, pairMap);
       try { if (!fKind && !fStatus && !fQ && list.length) localStorage.setItem("lf_board", JSON.stringify(list)); } catch (e) { /* ignore */ }
     } catch (e) {
       if (!paintSnapshot()) { $("empty-state").classList.remove("hidden"); $("empty-state").classList.add("flex"); }
       else toast("Showing saved board — server unreachable", "error");
     }
   }
+  window.openDetail = async (id) => {
+    try {
+      const r = await fetch(`/items/${encodeURIComponent(id)}`);
+      if (!r.ok) { toast("Item not found", "error"); return; }
+      const i = await r.json();
+      const d = i.description_json || {};
+      const at = [d.object_class, (d.colors || []).join(", "), d.brand].filter(Boolean).join(" · ");
+      let pairHtml = "";
+      try {
+        const pr = await fetch(`/items/${encodeURIComponent(id)}/pair`);
+        const b = pr.ok ? await pr.json() : { pairs: [] };
+        if (b.pairs && b.pairs.length) {
+          const p = b.pairs[0];
+          pairHtml = `<div style="display:flex;gap:10px;align-items:center;margin-top:10px;background:#F7F7F8;border-radius:12px;padding:10px">
+            <img src="/items/${esc(p.item_id)}/image" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:9px" onerror="this.style.display='none'"/>
+            <div style="font-size:13px">Matched with <b>${esc(p.user_description || p.item_id.slice(0, 8))}</b> (${Math.round(p.score * 100)}%)<br><span style="color:#77777b">${esc(p.reason || "")}</span></div></div>`;
+        }
+      } catch (e) { /* ignore */ }
+      $("dt-body").innerHTML =
+        `<img src="/items/${esc(i.id)}/image" alt="" style="width:100%;max-height:300px;object-fit:cover;border-radius:12px" onerror="this.style.display='none'"/>` +
+        `<div style="display:flex;gap:6px;margin:10px 0 2px"><span class="tag ${esc(i.item_type)}" style="font-size:10.5px;font-weight:800;text-transform:uppercase;border-radius:99px;padding:4px 10px;color:#fff;background:${i.item_type === "lost" ? "#EF4444" : "#10B981"}">${esc(i.item_type)}</span>` +
+        `<span style="font-size:10.5px;font-weight:800;text-transform:uppercase;border-radius:99px;padding:4px 10px;background:#F7F7F8;border:1px solid #E4E4E7">${esc(i.status)}</span></div>` +
+        `<h3 style="margin:6px 0 2px;font-size:19px">${esc(i.user_description)}</h3>` +
+        (at ? `<div style="font-size:13px;color:#46464a">${esc(at)}</div>` : "") +
+        ((d.distinguishing_marks || []).length ? `<div style="font-size:13px;color:#46464a">Marks: ${esc(d.distinguishing_marks.join(", "))}</div>` : "") +
+        `<div style="margin-top:8px"><div class="dt-row"><span>Item ID</span><code style="font-size:12px;word-break:break-all">${esc(i.id)}</code></div>` +
+        `<div class="dt-row"><span>Reported</span>${esc(ago(i.created_at))}</div></div>` + pairHtml;
+      $("dt-overlay").style.display = "flex";
+    } catch (e) { toast("Server unreachable", "error"); }
+  };
+  window.closeDetail = () => { $("dt-overlay").style.display = "none"; };
   document.querySelectorAll(".filter-kind-btn").forEach(b => b.onclick = () => {
     document.querySelectorAll(".filter-kind-btn").forEach(x => x.className = "filter-kind-btn px-3 py-1 rounded-lg text-xs font-semibold text-[#46464a]");
     b.className = "filter-kind-btn px-3 py-1 rounded-lg text-xs font-bold bg-black text-white";

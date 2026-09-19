@@ -397,3 +397,129 @@ def test_matches_min_score_filters(monkeypatch):
     assert body["matches"][0]["image_url"] == "/items/a/image"
     body = c.get(f"/items/{item.id}/matches?k=5&min_score=0.5").json()
     assert [m["item_id"] for m in body["matches"]] == ["a"]
+
+
+def _pair_repo():
+    repo = FakeRepo()
+    lost = Item(
+        item_type=ItemType.LOST,
+        user_description="lost umbrella",
+        image_path="/tmp/fake.png",
+        description_json={"object_class": "umbrella", "colors": ["black"]},
+        embedding=[0.1, 0.2, 0.3],
+    )
+    found = Item(
+        item_type=ItemType.FOUND,
+        user_description="found umbrella",
+        image_path="/tmp/fake.png",
+        description_json={"object_class": "umbrella", "colors": ["black"]},
+        embedding=[0.1, 0.2, 0.3],
+    )
+    repo.save(lost)
+    repo.save(found)
+    return repo, lost, found
+
+
+def test_confirm_match_marks_both_and_stores_pair():
+    from src.storage import repository as repo_mod
+
+    repo_mod.clear_memory()
+    repo, lost, found = _pair_repo()
+
+    class FakeSvc:
+        def cosine_similarity(self, a, b):
+            return 0.9
+
+    app = create_app(repo=repo, service=FakeSvc())
+    c = TestClient(app)
+    r = c.post(f"/items/{lost.id}/match", json={"other_item_id": found.id})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["lost_item_id"] == lost.id
+    assert body["found_item_id"] == found.id
+    assert body["score"] == 0.9
+    assert "umbrella" in body["reason"]
+    assert c.get(f"/items/{lost.id}").json()["status"] == "matched"
+    assert c.get(f"/items/{found.id}").json()["status"] == "matched"
+    pair = c.get(f"/items/{lost.id}/pair").json()
+    assert len(pair["pairs"]) == 1
+    assert pair["pairs"][0]["item_id"] == found.id
+    assert pair["pairs"][0]["user_description"] == "found umbrella"
+    pair2 = c.get(f"/items/{found.id}/pair").json()
+    assert pair2["pairs"][0]["item_id"] == lost.id
+    repo_mod.clear_memory()
+
+
+def test_confirm_match_rejects_same_type():
+    from src.storage import repository as repo_mod
+
+    repo_mod.clear_memory()
+    repo = FakeRepo()
+    a = Item(
+        item_type=ItemType.LOST,
+        user_description="a",
+        image_path="/tmp/fake.png",
+        description_json={},
+        embedding=[0.1],
+    )
+    b = Item(
+        item_type=ItemType.LOST,
+        user_description="b",
+        image_path="/tmp/fake.png",
+        description_json={},
+        embedding=[0.1],
+    )
+    repo.save(a)
+    repo.save(b)
+    app = create_app(repo=repo, service=FakeService())
+    c = TestClient(app)
+    assert c.post(f"/items/{a.id}/match", json={"other_item_id": b.id}).status_code == 400
+    assert c.post(f"/items/{a.id}/match", json={"other_item_id": "nope"}).status_code == 404
+    assert c.get(f"/items/{a.id}/pair").json() == {"query_id": a.id, "pairs": []}
+
+
+def test_scan_excludes_matched_and_same_type():
+    import asyncio
+
+    from src.concurrency.pipeline import find_matches_for_item
+    from src.models import ItemStatus
+    from src.storage import repository as repo_mod
+
+    async def scenario():
+        repo_mod.clear_memory()
+        lost = Item(
+            item_type=ItemType.LOST,
+            user_description="lost umbrella",
+            image_path="/tmp/fake.png",
+            description_json={},
+            embedding=[0.1, 0.2, 0.3],
+        )
+        await repo_mod.create_item(lost)
+        for itype, status in [
+            (ItemType.FOUND, ItemStatus.PENDING),
+            (ItemType.FOUND, ItemStatus.MATCHED),
+            (ItemType.LOST, ItemStatus.PENDING),
+        ]:
+            it = Item(
+                item_type=itype,
+                user_description="x",
+                image_path="/tmp/fake.png",
+                description_json={},
+                embedding=[0.1, 0.2, 0.3],
+                status=status,
+            )
+            await repo_mod.create_item(it)
+
+        class Svc:
+            def top_k(self, q, cs, k):
+                return list(range(min(k, len(cs))))
+
+            def cosine_similarity(self, a, b):
+                return 0.9
+
+        out = await find_matches_for_item(lost.id, 10, Svc(), None)
+        repo_mod.clear_memory()
+        return out
+
+    out = asyncio.run(scenario())
+    assert len(out) == 1
