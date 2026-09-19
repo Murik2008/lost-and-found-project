@@ -13,7 +13,6 @@ import numpy as np
 import pytest
 
 from ai.providers.base import VLMProvider, EmbeddingProvider
-from src.models import Item, ItemStatus, ItemType, MatchRecord
 
 
 class FakeVLM(VLMProvider):
@@ -87,40 +86,3 @@ def sample_image(tmp_path):
     p = tmp_path / "tiny.png"
     p.write_bytes(png_bytes)
     return str(p)
-
-
-@pytest.fixture
-def sample_lost_item(sample_image: str) -> Item:
-    """Creates sample the lost item for the tests"""
-    item = Item(
-        item_type=ItemType.LOST,
-        user_description="Lost black Fulton umbrella",
-        image_path=sample_image,
-        description_json={"object_class": "umbrella", "colors": ["black"]},
-        embedding=[0.2, 0.6, 0.8, 0.4, 0.1, 0.7, 0.4, 0.3],
-        status=ItemStatus.PENDING,
-    )
-    return item
-
-@pytest.fixture
-def sample_found_item(sample_image: str) -> Item:
-    """Creates sample found item for the tests"""
-    item = Item(
-        item_type=ItemType.FOUND,
-        user_description="Found black Fulton umbrella",
-        image_path=sample_image,
-        description_json={"object_class": "umbrella", "colors": ["black"]},
-        embedding=[0.9, 0.6, 0.7, 0.5, 0.7, 0.6, 0.1, 0.2],
-        status=ItemStatus.PENDING,
-    )
-    return item
-
-@pytest.fixture
-def sample_match_record(sample_lost_item: Item, sample_found_item: Item) -> MatchRecord:
-    """Creates sample match record for the tests"""
-    return MatchRecord(
-        lost_item_id=sample_lost_item.id,
-        found_item_id=sample_found_item.id,
-        score=0.92, #cosine similarity
-        reason="High match of characteristics and text descriptions",
-    )

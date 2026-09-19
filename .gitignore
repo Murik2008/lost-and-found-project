@@ -3,24 +3,3 @@
 /postman
 /.postman
 .env
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.eggs/
-dist/
-build/
-
-# Pytest / coverage
-.pytest_cache/
-.coverage
-.coverage.*
-coverage.xml
-htmlcov/
-*.cover
-
-# Mypy / ruff
-.mypy_cache/
-.ruff_cache/

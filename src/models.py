@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -29,7 +29,7 @@ class Item(BaseModel):
     description_json: dict[str, Any]
     embedding: list[float]
     status: ItemStatus = ItemStatus.PENDING
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class MatchRecord(BaseModel):
@@ -40,4 +40,4 @@ class MatchRecord(BaseModel):
     found_item_id: str
     score: float        # cosine similarity score, between -1 and 1
     reason: str = ""    # optional explanation
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.utcnow)

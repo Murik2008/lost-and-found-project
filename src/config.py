@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     database_url: str = ""
 
     # ── Filesystem
-    data_dir: Path = Path("../data")
+    data_dir: Path = Path("data")
 
     @property
     def lost_dir(self) -> Path:
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
         return self.data_dir / "found"
 
     # ── Validation
-    max_file_size_bytes: int = 5 * 1024 * 1024
+    max_file_size_bytes: int = 5 * 1024 * 1024   # 5 MB
 
     # ── Logging
     log_level: str = "INFO"
