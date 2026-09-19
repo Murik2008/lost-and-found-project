@@ -29,6 +29,10 @@ class Item(BaseModel):
     description_json: dict[str, Any]
     embedding: list[float]
     status: ItemStatus = ItemStatus.PENDING
+    owner_token: str = Field(
+        default_factory=lambda: uuid.uuid4().hex,
+        description="Secret returned once at registration; required to edit/delete.",
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

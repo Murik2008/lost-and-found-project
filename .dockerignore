@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+*.pyc
+.env
+.pytest_cache
+.coverage
+data/lost/*
+data/found/*
+!data/lost/.gitkeep
+!data/found/.gitkeep

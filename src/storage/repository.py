@@ -1,12 +1,7 @@
 """PostgreSQL persistence + filesystem image storage.
 
-Owns the connection pool, the schema, and every SQL statement in the project.
-No other module should import asyncpg or write raw SQL.
-
-Lifecycle
----------
-Call `init_db()` once at application startup (FastAPI lifespan / CLI entry)
-and `close_db()` at shutdown.
+Uses Postgres when DATABASE_URL is set, otherwise falls back to an
+in-memory store so the API, CLI and web UI work locally without a database.
 """
 
 from __future__ import annotations
@@ -14,27 +9,52 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-# from datetime import datetime
 from pathlib import Path
 
 import asyncpg
 import numpy as np
 
-# from src import ItemType
 from src.config import settings
-# from src.core.matcher import Matcher
 from src.models import Item, ItemStatus, ItemType, MatchRecord
 
 logger = logging.getLogger(__name__)
 
 _pool: asyncpg.Pool | None = None
 
+# In-memory fallback for local runs without DATABASE_URL.
+_memory_items: dict[str, Item] = {}
+_memory_matches: dict[str, MatchRecord] = {}
+
+
+_db_failed: bool = False
+
+
+def _use_memory() -> bool:
+    return not settings.database_url or _db_failed
+
+
+async def _ensure_ready() -> bool:
+    """Make sure the Postgres pool is up. Returns False when the memory
+    fallback should be used (no URL configured or DB unreachable)."""
+    global _db_failed
+    if not settings.database_url or _db_failed:
+        return False
+    if _pool is not None:
+        return True
+    try:
+        await init_db()
+        return True
+    except Exception:
+        logger.exception("database unavailable, falling back to in-memory store")
+        _db_failed = True
+        return False
+
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png" }
 
 # Schema:
 
 SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS schema (
+CREATE TABLE IF NOT EXISTS items (
     id               TEXT PRIMARY KEY,
     item_type        TEXT        NOT NULL CHECK (item_type IN ('lost', 'found')),
     user_description TEXT        NOT NULL DEFAULT '',
@@ -43,8 +63,11 @@ CREATE TABLE IF NOT EXISTS schema (
     embedding        DOUBLE PRECISION[] NOT NULL,
     status           TEXT        NOT NULL DEFAULT 'pending'
                      CHECK (status IN ('pending', 'matched', 'closed')),
+    owner_token      TEXT        NOT NULL DEFAULT '',
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Migration for databases created before owner_token existed.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS owner_token TEXT NOT NULL DEFAULT '';
  
 -- The hot query is "give me every pending item of the opposite type",
 -- so index exactly that pair.
@@ -119,24 +142,32 @@ async def health_check() -> bool:
 
 # Filesystem: Image storage
 
-def save_image(data: bytes, original_filename: str, item_type: ItemType) -> Path:
+def store_image_bytes(data: bytes, original_filename: str, item_type: ItemType) -> str:
     suffix = Path(original_filename).suffix.lower()
 
     if suffix not in ALLOWED_IMAGE_SUFFIXES:
-        raise ValueError(f"Unsupported image suffix: {suffix}"
+        raise ValueError(f"Unsupported image suffix: {suffix} "
                          f"allowed: {', '.join(sorted(ALLOWED_IMAGE_SUFFIXES))}")
 
-    if len(data) > settings.max_file_size:
-        raise ValueError(f"Image too large: {len(data)}"
-                         f"(max {settings.max_file_size} bytes)")
+    if len(data) > settings.max_file_size_bytes:
+        raise ValueError(f"Image too large: {len(data)} "
+                         f"(max {settings.max_file_size_bytes} bytes)")
 
-    target_dir = settings.log_dir if item_type == ItemType.LOST else settings.founf_dir
+    target_dir = settings.lost_dir if item_type == ItemType.LOST else settings.found_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    path = target_dir / f"{uuid.uuid4()}{suffix}"
+    safe_name = f"{uuid.uuid4().hex}{suffix}"
+    path = (target_dir / safe_name).resolve()
+    base = target_dir.resolve()
+    if base not in path.parents and path != base:
+        raise ValueError("path escapes storage dir")
     path.write_bytes(data)
-    logger.info(f"saved image %s (%d bytes)", path, len(data))
-    return path
+    logger.info("saved image %s (%d bytes)", path, len(data))
+    return str(path)
+
+
+def save_image(data: bytes, original_filename: str, item_type: ItemType) -> Path:
+    return Path(store_image_bytes(data, original_filename, item_type))
 
 def delete_image(image_path : str | Path) -> None:
     try:
@@ -157,18 +188,23 @@ def _row_to_item(row : asyncpg.Record) -> Item:
         else row["description_json"]),
         embedding=list(row["embedding"]),
         status=ItemStatus(row["status"]),
+        owner_token=row.get("owner_token", "") or "",
         created_at=row["created_at"],
     )
 
 async def create_item(item : Item) -> Item:
-    async with get_pool() as conn:
+    if not await _ensure_ready():
+        _memory_items[item.id] = item
+        logger.info("created item %s (%s) in memory", item.id, item.item_type.value)
+        return item
+    async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO items (
                 id, item_type, user_description, image_path,
-                description_json, embedding, status, created_at
+                description_json, embedding, status, owner_token, created_at
             )
-            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
             RETURNING *
             """,
             item.id,
@@ -178,17 +214,28 @@ async def create_item(item : Item) -> Item:
             json.dumps(item.description_json),
             item.embedding,
             item.status.value,
+            item.owner_token,
             item.created_at,
         )
     logger.info("created item %s (%s)", item.id, item.item_type.value)
     return _row_to_item(row)
 
 async def get_item(item_id : str) -> Item | None:
+    if not await _ensure_ready():
+        return _memory_items.get(item_id)
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM items WHERE id = $1", item_id)
     return _row_to_item(row) if row else None
 
 async def list_items(item_type: ItemType | None = None, status : ItemStatus | None = None, limit : int = 50, offset : int = 0) -> list[Item]:
+    if not await _ensure_ready():
+        items = list(_memory_items.values())
+        if item_type is not None:
+            items = [i for i in items if i.item_type == item_type]
+        if status is not None:
+            items = [i for i in items if i.status == status]
+        items.sort(key=lambda i: i.created_at, reverse=True)
+        return items[offset:offset + limit]
     clauses: list[str] = []
     params: list[object] = []
 
@@ -204,14 +251,25 @@ async def list_items(item_type: ItemType | None = None, status : ItemStatus | No
 
     sql = (
         f"SELECT * FROM items {where}"
-        f"ORDER BY created_at DESC LIMIT ${len(params) - 1} OFFSET {len(params)}"
+        f"ORDER BY created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
     )
 
     async with get_pool().acquire() as conn:
-        rows = await conn.fetchrow(sql, *params)
+        rows = await conn.fetch(sql, *params)
     return [_row_to_item(r) for r in rows]
 
 async def get_candidates(item_type: ItemType, status: ItemStatus | None = ItemStatus.PENDING) -> tuple[list[str], list[np.ndarray]]:
+    if not await _ensure_ready():
+        ids: list[str] = []
+        embeddings: list[np.ndarray] = []
+        for item in _memory_items.values():
+            if item.item_type != item_type:
+                continue
+            if status is not None and item.status != status:
+                continue
+            ids.append(item.id)
+            embeddings.append(np.asarray(item.embedding, dtype=np.float32))
+        return ids, embeddings
     sql = "SELECT id, embedding FROM items WHERE item_type = $1"
     params: list[object] = [item_type.value]
 
@@ -228,11 +286,24 @@ async def get_candidates(item_type: ItemType, status: ItemStatus | None = ItemSt
     return ids, embeddings
 
 async def update_item_status(item_id: str, status: ItemStatus) -> Item | None:
+    if not await _ensure_ready():
+        item = _memory_items.get(item_id)
+        if item is None:
+            return None
+        item.status = status
+        return item
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("UPDATE items SET status = $2 WHERE id = $1 RETURNING *", item_id, status.value)
     return _row_to_item(row) if row else None
 
 async def delete_item(item_id: str, remove_file: bool = True) -> bool:
+    if not await _ensure_ready():
+        item = _memory_items.pop(item_id, None)
+        if item is None:
+            return False
+        if remove_file:
+            delete_image(item.image_path)
+        return True
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("DELETE FROM items WHERE id = $1 RETURNING image_path", item_id)
 
@@ -255,6 +326,15 @@ def _row_to_match(row : asyncpg.Record) -> MatchRecord:
     )
 
 async def create_match(match: MatchRecord) -> MatchRecord:
+    if not await _ensure_ready():
+        for existing in list(_memory_matches.values()):
+            if (existing.lost_item_id == match.lost_item_id
+                    and existing.found_item_id == match.found_item_id):
+                existing.score = match.score
+                existing.reason = match.reason
+                return existing
+        _memory_matches[match.id] = match
+        return match
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -278,6 +358,8 @@ async def create_match(match: MatchRecord) -> MatchRecord:
 async def create_matches(matches : list[MatchRecord]) -> list[MatchRecord]:
     if not matches:
         return []
+    if not await _ensure_ready():
+        return [await create_match(m) for m in matches]
 
     async with get_pool().acquire() as conn, conn.transaction():
         rows = [await conn.fetchrow(
@@ -301,6 +383,12 @@ async def create_matches(matches : list[MatchRecord]) -> list[MatchRecord]:
     return [_row_to_match(r) for r in rows]
 
 async def get_matches_for_item(item_id : str, min_score : float = 0.0) -> list[MatchRecord]:
+    if not await _ensure_ready():
+        out = [m for m in _memory_matches.values()
+               if (m.lost_item_id == item_id or m.found_item_id == item_id)
+               and m.score >= min_score]
+        out.sort(key=lambda m: m.score, reverse=True)
+        return out
     async with get_pool().acquire() as conn:
         row = await conn.fetch(
             """
@@ -313,3 +401,34 @@ async def get_matches_for_item(item_id : str, min_score : float = 0.0) -> list[M
             min_score,
         )
         return [_row_to_match(r) for r in row]
+
+
+def clear_memory() -> None:
+    _memory_items.clear()
+    _memory_matches.clear()
+
+
+class SyncRepository:
+    """Repository facade used by the HTTP layer.
+
+    Methods are async and run on the caller's event loop, which the
+    asyncpg pool requires. Callers accept both sync fakes (tests) and
+    this async implementation via maybe-await.
+    """
+
+    async def save(self, item: Item) -> Item:
+        return await create_item(item)
+
+    async def get(self, item_id: str) -> Item | None:
+        return await get_item(item_id)
+
+    async def list(
+        self,
+        item_type: ItemType | None = None,
+        status: ItemStatus | None = None,
+    ) -> list[Item]:
+        return await list_items(item_type=item_type, status=status)
+
+
+def get_repository() -> SyncRepository:
+    return SyncRepository()

@@ -1,0 +1,90 @@
+{
+  "info": {
+    "name": "Lost & Found",
+    "description": "Smart Lost & Found API. Set base_url (default http://localhost:8000). After registering an item, copy its id into item_id.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "item_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{base_url}}/health" }
+    },
+    {
+      "name": "Register lost",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/items/lost",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "image", "type": "file", "src": [] },
+            { "key": "user_description", "type": "text", "value": "black umbrella" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Register found",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/items/found",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "image", "type": "file", "src": [] },
+            { "key": "user_description", "type": "text", "value": "black umbrella found" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "List all",
+      "request": { "method": "GET", "url": "{{base_url}}/items" }
+    },
+    {
+      "name": "List lost only",
+      "request": { "method": "GET", "url": "{{base_url}}/items?type=lost" }
+    },
+    {
+      "name": "List found only",
+      "request": { "method": "GET", "url": "{{base_url}}/items?type=found" }
+    },
+    {
+      "name": "List by status",
+      "request": { "method": "GET", "url": "{{base_url}}/items?status=pending" }
+    },
+    {
+      "name": "Get item",
+      "request": { "method": "GET", "url": "{{base_url}}/items/{{item_id}}" }
+    },
+    {
+      "name": "Get item image",
+      "request": { "method": "GET", "url": "{{base_url}}/items/{{item_id}}/image" }
+    },
+    {
+      "name": "Find matches",
+      "request": { "method": "GET", "url": "{{base_url}}/items/{{item_id}}/matches?k=3" }
+    },
+    {
+      "name": "Find matches (min score)",
+      "request": { "method": "GET", "url": "{{base_url}}/items/{{item_id}}/matches?k=5&min_score=0.5" }
+    },
+    {
+      "name": "Mark matched",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/items/{{item_id}}/status",
+        "body": { "mode": "raw", "raw": "{\"status\": \"matched\"}" }
+      }
+    },
+    {
+      "name": "Delete item (API only, not on the site)",
+      "request": { "method": "DELETE", "url": "{{base_url}}/items/{{item_id}}" }
+    }
+  ]
+}

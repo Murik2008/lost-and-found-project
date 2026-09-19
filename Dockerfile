@@ -7,14 +7,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-chache-dir --upgrade pip \
- && pip install --no-chache-dir -r requirments.txt
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
 
 COPY ai/ ./ai/
 COPY src/ ./src/
+COPY data/ ./data/
+COPY validation.py ./validation.py
 
 RUN mkdir -p /app/data/lost /app/data/found
-VOLUME ["/app/data1"]
+VOLUME ["/app/data"]
 
 RUN useradd --create-home --uid 1000 appuser \
  && chown -R appuser:appuser /app

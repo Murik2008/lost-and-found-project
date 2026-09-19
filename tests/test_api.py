@@ -46,6 +46,16 @@ class FakeRepo:
             out = [i for i in out if i.status == status]
         return out
 
+    def update_item_status(self, item_id: str, status: ItemStatus) -> Item | None:
+        item = self.items.get(item_id)
+        if item is None:
+            return None
+        item.status = status
+        return item
+
+    def delete_item(self, item_id: str) -> bool:
+        return self.items.pop(item_id, None) is not None
+
 
 class FakeService:
     def __init__(self, vec=None):
@@ -84,7 +94,7 @@ def test_health(client):
     c, _, _ = client
     r = c.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    assert r.json()["status"] == "ok"
 
 
 def test_register_lost_ok(client):
@@ -217,3 +227,114 @@ def test_matches_ok_with_fake_pipeline(monkeypatch):
     body = r.json()
     assert body["query_id"] == item.id
     assert body["matches"][0]["item_id"] == "found-1"
+
+
+def test_update_status_ok(client):
+    c, repo, _ = client
+    data, name = _sample_png_bytes()
+    r = c.post(
+        "/items/lost",
+        files={"image": (name, data, "image/png")},
+        data={"user_description": "umbrella"},
+    )
+    item_id = r.json()["id"]
+    r = c.patch(f"/items/{item_id}/status", json={"status": "matched"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "matched"
+    assert "owner_token" not in r.json()
+
+
+def test_update_status_404(client):
+    c, _, _ = client
+    assert c.patch("/items/nope/status", json={"status": "closed"}).status_code == 404
+
+
+def test_no_owner_token_leaked(client):
+    c, _, _ = client
+    data, name = _sample_png_bytes()
+    r = c.post(
+        "/items/lost",
+        files={"image": (name, data, "image/png")},
+        data={"user_description": "umbrella"},
+    )
+    assert "owner_token" not in r.json()
+    for entry in c.get("/items").json():
+        assert "owner_token" not in entry
+
+def test_update_status_invalid(client):
+    c, _, _ = client
+    r = c.patch("/items/nope/status", json={"status": "bogus"})
+    assert r.status_code == 422
+
+
+def test_delete_ok(client):
+    c, repo, _ = client
+    data, name = _sample_png_bytes()
+    r = c.post(
+        "/items/lost",
+        files={"image": (name, data, "image/png")},
+        data={"user_description": "umbrella"},
+    )
+    item_id = r.json()["id"]
+    r = c.delete(f"/items/{item_id}")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": item_id}
+    assert c.get(f"/items/{item_id}").status_code == 404
+
+
+def test_delete_404(client):
+    c, _, _ = client
+    assert c.delete("/items/nope").status_code == 404
+
+
+def test_image_ok():
+    repo = FakeRepo()
+    data, name = _sample_png_bytes()
+    item = Item(
+        item_type=ItemType.LOST,
+        user_description="umbrella",
+        image_path=str(Path(__file__).parent.parent / "data" / "lost" / name),
+        description_json={},
+        embedding=[0.1, 0.2, 0.3],
+    )
+    repo.save(item)
+    app = create_app(repo=repo, service=FakeService())
+    c = TestClient(app)
+    r = c.get(f"/items/{item.id}/image")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert r.content == data
+
+
+def test_image_404(client):
+    c, _, _ = client
+    assert c.get("/items/nope/image").status_code == 404
+
+
+def test_matches_min_score_filters(monkeypatch):
+    repo = FakeRepo()
+    service = FakeService()
+    item = Item(
+        item_type=ItemType.LOST,
+        user_description="umbrella",
+        image_path="/tmp/fake.png",
+        description_json={},
+        embedding=[0.1, 0.2, 0.3],
+    )
+    repo.save(item)
+
+    fake_mod = types.ModuleType("src.concurrency.pipeline")
+
+    async def fake_find(item_id, k, svc, rp):
+        return [("a", 0.9, "good"), ("b", 0.3, "weak")]
+
+    fake_mod.find_matches_for_item = fake_find
+    monkeypatch.setitem(sys.modules, "src.concurrency.pipeline", fake_mod)
+
+    app = create_app(repo=repo, service=service)
+    c = TestClient(app)
+    body = c.get(f"/items/{item.id}/matches?k=5").json()
+    assert len(body["matches"]) == 2
+    assert body["matches"][0]["image_url"] == "/items/a/image"
+    body = c.get(f"/items/{item.id}/matches?k=5&min_score=0.5").json()
+    assert [m["item_id"] for m in body["matches"]] == ["a"]
